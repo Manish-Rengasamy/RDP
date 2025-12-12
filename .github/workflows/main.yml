@@ -52,21 +52,23 @@ jobs:
       - name: Create Keepalive Task
         shell: pwsh
         run: |
-          $expiry = (Get-Date).ToUniversalTime().AddDays(90).ToString("o")
           $scriptPath = "C:\ProgramData\keepalive.ps1"
 
           @"
           param()
-
           \$ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
           \$auth = "$env:TAILSCALE_AUTH_KEY"
           & \$ts up --authkey \$auth --accept-routes --accept-dns=false
           "@ | Out-File -Encoding utf8 $scriptPath
 
-          $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -File `"$scriptPath`""
-          $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 15)
+          $action = New-ScheduledTaskAction -Execute "powershell.exe" `
+            -Argument "-ExecutionPolicy Bypass -File `"$scriptPath`""
 
-          Register-ScheduledTask -TaskName "TSKeepAlive" -Action $action -Trigger $trigger -RunLevel Highest -Force
+          $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
+            -RepetitionInterval (New-TimeSpan -Minutes 15)
+
+          Register-ScheduledTask -TaskName "TSKeepAlive" `
+            -Action $action -Trigger $trigger -RunLevel Highest -Force
 
       - name: Print Info
         shell: pwsh
