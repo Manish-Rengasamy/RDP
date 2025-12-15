@@ -10,72 +10,107 @@ jobs:
 
     env:
       TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+      RDP_USERNAME: Admin
+      RDP_PASSWORD: Admin@8520
 
     steps:
       - name: Enable RDP
         shell: pwsh
         run: |
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name fDenyTSConnections -Value 0 -Force
+          Set-ItemProperty `
+            -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+            -Name fDenyTSConnections `
+            -Value 0 `
+            -Force
+
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
 
-      - name: Create RDP User
+      - name: Create or Update RDP User (Fixed Credentials)
         shell: pwsh
         run: |
-          $username = "Manish"
-          $password = "Tn39w4455@"
-          $secure = ConvertTo-SecureString $password -AsPlainText -Force
+          $username = "$env:RDP_USERNAME"
+          $password = "$env:RDP_PASSWORD"
+          $secure   = ConvertTo-SecureString $password -AsPlainText -Force
 
-          if (-not (Get-LocalUser -Name $username -ErrorAction SilentlyContinue)) {
-            New-LocalUser -Name $username -Password $secure -AccountNeverExpires -PasswordNeverExpires
+          $user = Get-LocalUser -Name $username -ErrorAction SilentlyContinue
+
+          if (-not $user) {
+            New-LocalUser `
+              -Name $username `
+              -Password $secure `
+              -AccountNeverExpires `
+              -PasswordNeverExpires
+          } else {
+            Set-LocalUser -Name $username -Password $secure
           }
 
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username -ErrorAction SilentlyContinue
-          Add-LocalGroupMember -Group "Administrators" -Member $username -ErrorAction SilentlyContinue
+          Add-LocalGroupMember `
+            -Group "Remote Desktop Users" `
+            -Member $username `
+            -ErrorAction SilentlyContinue
+
+          Add-LocalGroupMember `
+            -Group "Administrators" `
+            -Member $username `
+            -ErrorAction SilentlyContinue
 
       - name: Install Tailscale
         shell: pwsh
         run: |
-          $url = "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi"
+          $url  = "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi"
           $file = "$env:TEMP\tailscale.msi"
+
           Invoke-WebRequest -Uri $url -OutFile $file
-          Start-Process msiexec.exe -ArgumentList "/i `"$file`" /quiet /norestart" -Wait
+          Start-Process msiexec.exe `
+            -ArgumentList "/i `"$file`" /quiet /norestart" `
+            -Wait
 
       - name: Bring up Tailscale
         shell: pwsh
         run: |
           $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
-          & $ts up --authkey $env:TAILSCALE_AUTH_KEY --accept-routes --accept-dns=false
+
+          & $ts up `
+            --authkey $env:TAILSCALE_AUTH_KEY `
+            --accept-routes `
+            --accept-dns=false
 
           $ip = (& $ts ip -4 | Select-Object -First 1)
           "TAILSCALE_IP=$ip" | Out-File -Append $env:GITHUB_ENV
 
-      - name: Create Keepalive Task
+      - name: Create Tailscale Keepalive Task
         shell: pwsh
         run: |
           $scriptPath = "C:\ProgramData\keepalive.ps1"
 
           @"
-          param()
           \$ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
           \$auth = "$env:TAILSCALE_AUTH_KEY"
           & \$ts up --authkey \$auth --accept-routes --accept-dns=false
           "@ | Out-File -Encoding utf8 $scriptPath
 
-          $action = New-ScheduledTaskAction -Execute "powershell.exe" `
+          $action = New-ScheduledTaskAction `
+            -Execute "powershell.exe" `
             -Argument "-ExecutionPolicy Bypass -File `"$scriptPath`""
 
-          $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
+          $trigger = New-ScheduledTaskTrigger `
+            -Once `
+            -At (Get-Date).AddMinutes(1) `
             -RepetitionInterval (New-TimeSpan -Minutes 15)
 
-          Register-ScheduledTask -TaskName "TSKeepAlive" `
-            -Action $action -Trigger $trigger -RunLevel Highest -Force
+          Register-ScheduledTask `
+            -TaskName "TSKeepAlive" `
+            -Action $action `
+            -Trigger $trigger `
+            -RunLevel Highest `
+            -Force
 
-      - name: Print Info
+      - name: Print RDP Info
         shell: pwsh
         run: |
           Write-Host "====================="
           Write-Host "     RDP DETAILS"
           Write-Host "====================="
-          Write-Host "Username: Manish"
-          Write-Host "Password: Tn39w4455@"
+          Write-Host "Username: Admin"
+          Write-Host "Password: Admin@8520"
           Write-Host "Tailscale IP: $env:TAILSCALE_IP"
